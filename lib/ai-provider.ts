@@ -164,6 +164,70 @@ export async function generateOpenAI(request: GenerationRequest): Promise<Genera
   }
 }
 
+// Real provider (Gemini)
+export async function generateGemini(request: GenerationRequest): Promise<GenerationResponse> {
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY not configured")
+  }
+
+  const { type, topic, difficulty = "medium", amount = 10 } = request
+
+  let prompt = ""
+  switch (type) {
+    case "EXPLAIN":
+      prompt = `Create a detailed explanation of "${topic}" at ${difficulty} level. Include key points and examples. Return as JSON with: {title: string, explanation: string, keyPoints: string[], examples: [{question: string, answer: string}]}`
+      break
+    case "FLASHCARDS":
+      prompt = `Create ${amount} flashcards about "${topic}". Return as JSON with: {title: string, cards: [{front: string, back: string}]}`
+      break
+    case "QUIZ":
+      prompt = `Create ${amount} multiple-choice questions about "${topic}" at ${difficulty} level. Return as JSON with: {title: string, questions: [{question: string, options: [string, string, string, string], correctAnswer: number (0-3), explanation: string}]}`
+      break
+    case "PLAN":
+      prompt = `Create a study plan for "${topic}". Return as JSON with: {title: string, duration: string, goals: string[], schedule: [{day: number, tasks: string[]}]}`
+      break
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: `You are an expert educational assistant. ${prompt} Return only valid JSON, no markdown formatting.`,
+              },
+            ],
+          },
+        ],
+      }),
+    }
+  )
+
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`Gemini API error: ${error}`)
+  }
+
+  const data = await response.json()
+  const text = data.candidates[0].content.parts[0].text
+  
+  // Clean up the response (remove markdown code blocks if present)
+  const cleanedText = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim()
+  const content = JSON.parse(cleanedText)
+
+  return {
+    type,
+    content,
+  }
+}
+
 // Main generator function
 export async function generate(request: GenerationRequest): Promise<GenerationResponse> {
   const provider = process.env.AI_PROVIDER || "mock"
@@ -171,6 +235,8 @@ export async function generate(request: GenerationRequest): Promise<GenerationRe
   switch (provider) {
     case "openai":
       return generateOpenAI(request)
+    case "gemini":
+      return generateGemini(request)
     case "mock":
     default:
       return generateMock(request)
